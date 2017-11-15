@@ -85,6 +85,7 @@ public class MonoCraft : Game
 
    private void BuildVB()
    {
+      visibleFaces = 0;
       List<VertexPositionNormalTexture> verts = new List<VertexPositionNormalTexture>(WORLD_VOL/32);
       for (int z = 0; z < WORLD_DIM; z++) for (int y = 0; y < WORLD_DIM; y++) for (int x = 0; x < WORLD_DIM; x++)
             {
