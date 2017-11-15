@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Diagnostics.Eventing.Reader;
 using System.IO;
 using System.Linq;
 using Microsoft.Xna.Framework;
@@ -31,8 +30,8 @@ public class MonoCraft : Game
 
    const int WORLD_DIM = 64;
    const int WORLD_VOL = WORLD_DIM*WORLD_DIM*WORLD_DIM;
-
-   private const float GRAVITY = 9.8f; // meters per second per second
+   const float GRAVITY = 9.8f; // meters per second per second
+   const float PLAYER_HEIGHT = 1.4f;
 
    private readonly byte[,,] data = new byte[WORLD_DIM, WORLD_DIM, WORLD_DIM];
 
@@ -40,7 +39,7 @@ public class MonoCraft : Game
    {
       atlas = Texture2D.FromStream(GraphicsDevice, new FileStream("art/tiles.png", FileMode.Open));
 
-      playerPosition = new Vector3(WORLD_DIM/2, WORLD_DIM/2, WORLD_DIM/2);
+      playerPosition = new Vector3(WORLD_DIM/2, 30, WORLD_DIM/2);
 
       basicEffect = new BasicEffect(GraphicsDevice) {World = Matrix.Identity};
 
@@ -211,19 +210,43 @@ public class MonoCraft : Game
       return faceGeom;
    }
 
+   private bool lockMouse = true;
+
    protected override void Update(GameTime gameTime)
    {
       KeyboardState keyboardState = Keyboard.GetState();
 
-      if (keyboardState.IsKeyDown(Keys.Escape)) Exit();
+      if (keyboardState.IsKeyDown(Keys.Escape))
+      {
+         if (lockMouse)
+            lockMouse = false;
+         else
+            Exit();
+      }
 
       float deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
-      VoxPos playerVosPos = new VoxPos(playerPosition);
+      // player movement
+      Vector2 movementInput = new Vector2(keyboardState.IsKeyDown(Keys.A) ? 1 : (keyboardState.IsKeyDown(Keys.D) ? -1 : 0),
+                                          keyboardState.IsKeyDown(Keys.W) ? 1 : (keyboardState.IsKeyDown(Keys.S) ? -1 : 0));
+      if (movementInput.Length() > 1) movementInput.Normalize();
+      if (keyboardState.IsKeyDown(Keys.LeftShift)) movementInput *= 3;
+      var newPos = playerPosition + new Vector3(
+         (float)Math.Cos(playerCamAngles.Y-MathHelper.PiOver2)*movementInput.Y-(float)Math.Cos(playerCamAngles.Y)*movementInput.X,0,
+         (float)Math.Sin(playerCamAngles.Y-MathHelper.PiOver2)*movementInput.Y-(float)Math.Sin(playerCamAngles.Y)*movementInput.X
+         )*(float)gameTime.ElapsedGameTime.TotalSeconds*3;
+
+      if (!IsOpaqueSafe(new VoxPos(newPos)))
+      {
+         playerPosition = newPos;
+      }
+
+
+
 
       // player gravity
-      playerYaccel -= GRAVITY*deltaTime;
       playerPosition.Y += playerYaccel*deltaTime;
+      VoxPos playerVosPos = new VoxPos(playerPosition);
       if (IsOpaqueSafe(playerVosPos))
       {
          if (keyboardState.GetPressedKeys().Contains(Keys.Space))
@@ -236,25 +259,22 @@ public class MonoCraft : Game
             playerYaccel = 0;
          }
       }
-
-      // player movement
-      Vector2 movementInput = new Vector2(keyboardState.IsKeyDown(Keys.A) ? 1 : (keyboardState.IsKeyDown(Keys.D) ? -1 : 0),
-                                          keyboardState.IsKeyDown(Keys.W) ? 1 : (keyboardState.IsKeyDown(Keys.S) ? -1 : 0));
-      if (movementInput.Length() > 1) movementInput.Normalize();
-      if (keyboardState.IsKeyDown(Keys.LeftShift)) movementInput *= 3;
-      playerPosition += new Vector3(
-         (float)Math.Cos(playerCamAngles.Y-MathHelper.PiOver2)*movementInput.Y-(float)Math.Cos(playerCamAngles.Y)*movementInput.X,0,
-         (float)Math.Sin(playerCamAngles.Y-MathHelper.PiOver2)*movementInput.Y-(float)Math.Sin(playerCamAngles.Y)*movementInput.X
-         )*(float)gameTime.ElapsedGameTime.TotalSeconds*3;
-
-
-      //camera controls
-      Point windowCenter = new Point(GraphicsDevice.Viewport.Width/2,GraphicsDevice.Viewport.Height/2);
-      Point mouseDelta = Mouse.GetState().Position-windowCenter;
-      Mouse.SetPosition(windowCenter.X, windowCenter.Y);
+      else
+      {
+         playerYaccel -= GRAVITY*deltaTime;
+         if (playerYaccel < -15) playerYaccel = -15;
+      }
       
-      playerCamAngles += new Vector2(mouseDelta.Y, mouseDelta.X)*(float)gameTime.ElapsedGameTime.TotalSeconds*0.5f;
-      playerCamAngles.X = MathHelper.Clamp(playerCamAngles.X, -MathHelper.PiOver2, MathHelper.PiOver2);
+      //camera controls
+      if (lockMouse)
+      {
+         Point windowCenter = new Point(GraphicsDevice.Viewport.Width / 2, GraphicsDevice.Viewport.Height / 2);
+         Point mouseDelta = Mouse.GetState().Position - windowCenter;
+         Mouse.SetPosition(windowCenter.X, windowCenter.Y);
+
+         playerCamAngles += new Vector2(mouseDelta.Y, mouseDelta.X)*(float)gameTime.ElapsedGameTime.TotalSeconds*0.5f;
+         playerCamAngles.X = MathHelper.Clamp(playerCamAngles.X, -MathHelper.PiOver2, MathHelper.PiOver2);
+      }
 
 
       // get aiming voxel
@@ -262,7 +282,7 @@ public class MonoCraft : Game
       Vector3 aimEndRotLocal = Vector3.Transform(aimEndLocal, Matrix.CreateRotationX(playerCamAngles.X)*Matrix.CreateRotationY(-playerCamAngles.Y+MathHelper.Pi));
       Vector3 aimEndGlobal = playerPosition+aimEndRotLocal;
 
-      Vector3 playerCamPosition = playerPosition+Vector3.UnitY;
+      Vector3 playerCamPosition = playerPosition+Vector3.UnitY*PLAYER_HEIGHT;
       var voxelsTraversed = RaycastFromTo(playerCamPosition, aimEndGlobal);
 
       ButtonState curLMB = Mouse.GetState().LeftButton;
@@ -313,7 +333,7 @@ public class MonoCraft : Game
    {
       GraphicsDevice.Clear(Color.CornflowerBlue);
       
-      basicEffect.View = Matrix.CreateTranslation(-playerPosition - Vector3.UnitY);
+      basicEffect.View = Matrix.CreateTranslation(-playerPosition - Vector3.UnitY*PLAYER_HEIGHT);
       basicEffect.Projection = Matrix.CreateRotationY(playerCamAngles.Y)*Matrix.CreateRotationX(playerCamAngles.X)*Matrix.CreatePerspectiveFieldOfView(MathHelper.ToRadians(80),16/9f,0.01f,100f);
       basicEffect.VertexColorEnabled = false;
       basicEffect.TextureEnabled = true;
